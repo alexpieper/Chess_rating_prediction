@@ -21,6 +21,7 @@ def filter_and_preprocess_data():
     game_metadata = []
     n = 90000000
     man_counter = 0
+    export_counter = 0
     # n = 3000
 
     with open(filename, "r") as f:
@@ -58,8 +59,11 @@ def filter_and_preprocess_data():
             white_moves = parsed_list[1::6]
             black_moves = parsed_list[4::6]
             all_moves = parsed_list[1::3]
-            all_clocks = [i.split('%clk ')[1].split(']')[0] for i in parsed_list[2::3]]
-            all_evaluations = [i.split('%eval ')[1].split(']')[0] for i in parsed_list[2:-1:3]]
+            try:
+                all_clocks = [i.split('%clk ')[1].split(']')[0] for i in parsed_list[2::3]]
+                all_evaluations = [i.split('%eval ')[1].split(']')[0] for i in parsed_list[2:-1:3]]
+            except:
+                continue
 
             numeric_evaluations = [i for i in all_evaluations if not '#' in i]
             numeric_evaluations = [float(i) for i in numeric_evaluations]
@@ -137,41 +141,29 @@ def filter_and_preprocess_data():
             })
 
             # export the data every 100000 th successfully parsed game
+            # after that, i should have cleared the game_metadata list and export with an index and later on concat the stuff
             man_counter += 1
-            if man_counter in [j for j in range(0,n,100000)]:
+            if man_counter in [j for j in range(0,n,50000)]:
+                export_counter += 1
                 df = pd.DataFrame(game_metadata)
-                print(df)
                 bullet = df[df['time_control_seconds'] < 180]
                 blitz = df[(df['time_control_seconds'] >= 180) & (df['time_control_seconds'] < 600)]
                 rapid = df[(df['time_control_seconds'] >= 600) & (df['time_control_seconds'] < 1800)]
                 classical = df[df['time_control_seconds'] >= 1800]
 
-                bullet_file = os.path.join(processed_data_folder, 'bullet.csv')
-                blitz_file = os.path.join(processed_data_folder, 'blitz.csv')
-                rapid_file = os.path.join(processed_data_folder, 'rapid.csv')
-                classical_file = os.path.join(processed_data_folder, 'classical.csv')
+                bullet_file = os.path.join(processed_data_folder, 'batched_exports', f'bullet_{export_counter}.csv')
+                blitz_file = os.path.join(processed_data_folder, 'batched_exports', f'blitz_{export_counter}.csv')
+                rapid_file = os.path.join(processed_data_folder, 'batched_exports', f'rapid_{export_counter}.csv')
+                classical_file = os.path.join(processed_data_folder, 'batched_exports', f'classical_{export_counter}.csv')
 
                 bullet.to_csv(bullet_file)
                 blitz.to_csv(blitz_file)
                 rapid.to_csv(rapid_file)
                 classical.to_csv(classical_file)
 
-    df = pd.DataFrame(game_metadata)
-    print(df)
-    bullet = df[df['time_control_seconds'] < 180]
-    blitz = df[(df['time_control_seconds'] >= 180) & (df['time_control_seconds'] < 600)]
-    rapid = df[(df['time_control_seconds'] >= 600) & (df['time_control_seconds'] < 1800)]
-    classical = df[df['time_control_seconds'] >= 1800]
+                game_metadata = []
+                df = pd.DataFrame()
 
-    bullet_file = os.path.join(processed_data_folder, 'bullet.csv')
-    blitz_file = os.path.join(processed_data_folder, 'blitz.csv')
-    rapid_file = os.path.join(processed_data_folder, 'rapid.csv')
-    classical_file = os.path.join(processed_data_folder, 'classical.csv')
-
-    bullet.to_csv(bullet_file)
-    blitz.to_csv(blitz_file)
-    rapid.to_csv(rapid_file)
-    classical.to_csv(classical_file)
 
 if __name__ == '__main__':
     filter_and_preprocess_data()
