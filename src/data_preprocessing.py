@@ -6,6 +6,8 @@ import numpy as np
 import tqdm
 import multiprocessing
 
+import time
+
 
 def filter_and_preprocess_data():
     '''
@@ -18,26 +20,19 @@ def filter_and_preprocess_data():
 
     game_metadata = []
     n = 90000000
-    n = 10000
+    man_counter = 0
+    # n = 3000
 
     with open(filename, "r") as f:
         for i in tqdm.tqdm(range(n)):
             game = chess.pgn.read_game(f)
-            if game is None:
-                break
-
-            # Iterate over the games in the list
-            # print(game.mainline_moves())
-            # print('%clk' in str(game.mainline_moves()))
-            # if (not '%eval' in str(game.mainline_moves())):
-            if (not '%eval' in str(game.mainline_moves())) or (not '%clk' in str(game.mainline_moves())):
+            if game.headers['Termination'] == 'Abandoned':
                 continue
-            # else:
-            #     print(game)
+            if len(game.variations) == 0:
+                continue
 
-
-
-            # Create an empty dictionary to store the metadata for the current game
+            if game.variations[0].clock() is None or game.variations[0].eval() is None:
+                continue
 
 
             # Split the PGN formatted game into lines
@@ -57,28 +52,21 @@ def filter_and_preprocess_data():
 
             # $ is an NAG, we can ignore this (found: https://www.enpassant.dk/chess/palview/manual/pgn.htm)
             # these numbers might change, when we also have clock etc.
-            try:
-                parsed_list = [i for i in pgn_string.split('\n') if not '$' in i]
-                white_moves = parsed_list[1::6]
-                black_moves = parsed_list[4::6]
-                all_moves = parsed_list[1::3]
-                white_clocks = [i.split('%clk ')[1].split(']')[0] for i in parsed_list[2::6]]
-                black_clocks = [i.split('%clk ')[1].split(']')[0] for i in parsed_list[5::6]]
-                all_clocks = [i.split('%clk ')[1].split(']')[0] for i in parsed_list[2::3]]
 
-                white_evaluations = [i.split('%eval ')[1].split(']')[0] for i in parsed_list[2:-1:6]]
-                black_evaluations = [i.split('%eval ')[1].split(']')[0] for i in parsed_list[5:-1:6]]
-                all_evaluations = [i.split('%eval ')[1].split(']')[0] for i in parsed_list[2:-1:3]]
 
-                numeric_evaluations = [i for i in all_evaluations if not '#' in i]
-                numeric_evaluations_with_mate = ['100' if '#' in i and not '-' in i else i for i in all_evaluations]
-                numeric_evaluations_with_mate = ['-100' if '#-' in i else i for i in numeric_evaluations_with_mate]
-                numeric_evaluations = [float(i) for i in numeric_evaluations]
-                evaluation_variance = np.var(numeric_evaluations)
-                evaluation_iqr = np.percentile(numeric_evaluations, 75) - np.percentile(numeric_evaluations, 25)
-                evaluation_range = np.max(numeric_evaluations) - np.min(numeric_evaluations)
-            except:
-                continue
+            parsed_list = [i for i in pgn_string.split('\n') if not '$' in i]
+            white_moves = parsed_list[1::6]
+            black_moves = parsed_list[4::6]
+            all_moves = parsed_list[1::3]
+            all_clocks = [i.split('%clk ')[1].split(']')[0] for i in parsed_list[2::3]]
+            all_evaluations = [i.split('%eval ')[1].split(']')[0] for i in parsed_list[2:-1:3]]
+
+            numeric_evaluations = [i for i in all_evaluations if not '#' in i]
+            numeric_evaluations = [float(i) for i in numeric_evaluations]
+            evaluation_variance = np.var(numeric_evaluations)
+            evaluation_iqr = np.percentile(numeric_evaluations, 75) - np.percentile(numeric_evaluations, 25)
+            evaluation_range = np.max(numeric_evaluations) - np.min(numeric_evaluations)
+
 
 
 
@@ -99,19 +87,10 @@ def filter_and_preprocess_data():
             pawn_moves = len([i for i in all_moves if not any(string in i for string in ['N', 'B', 'R', 'Q', 'K', 'O'])])
 
 
-            # number_of_blunders = len([i for i in all_moves if '??' in i])
-            # number_of_excellent_moves = len([i for i in all_moves if '!!' in i])
-            # number_of_bad_moves = len([i for i in all_moves if '?' in i and not '??' in i])
-            # number_of_good_moves = len([i for i in all_moves if '!' in i and not '!!' in i])
-            # number_of_interesting_moves = len([i for i in all_moves if '!?' in i])
-            # number_of_dubious_moves = len([i for i in all_moves if '?!' in i])
-
-            numeric_evaluations_with_mate = ['100' if '#' in i and not '-' in i else i for i in all_evaluations]
-            numeric_evaluations_with_mate = ['-100' if '#-' in i else i for i in numeric_evaluations_with_mate]
-            numeric_evaluations_with_mate = [float(i) for i in numeric_evaluations_with_mate]
-            numeric_evaluations_with_mate = [j-i for i, j in zip(numeric_evaluations_with_mate[:-1], numeric_evaluations_with_mate[1:])]
-            number_of_blunders = len([i for i in numeric_evaluations_with_mate if abs(i) > 3])
-            number_of_bad_moves = len([i for i in numeric_evaluations_with_mate if abs(i) > 1.5 and abs(i) <= 3])
+            nags = [i for i in pgn_string.split('\n') if '$' in i]
+            number_of_bad_moves = len([i for i in nags if '2' in i])
+            number_of_blunders = len([i for i in nags if '4' in i])
+            number_of_dubious_moves = len([i for i in nags if '6' in i])
 
 
             if Termination == 'Normal':
@@ -146,8 +125,9 @@ def filter_and_preprocess_data():
                 'queen_moves': queen_moves,
                 'king_moves': king_moves,
                 'pawn_moves': pawn_moves,
-                'number_of_bad_moves': number_of_bad_moves,
                 'number_of_blunders': number_of_blunders,
+                'number_of_bad_moves': number_of_bad_moves,
+                'number_of_dubious_moves': number_of_dubious_moves,
                 'evaluation_variance': evaluation_variance,
                 'evaluation_iqr': evaluation_iqr,
                 'evaluation_range': evaluation_range,
@@ -156,7 +136,9 @@ def filter_and_preprocess_data():
                 'all_clocks':all_clocks
             })
 
-            if i in [j for j in range(0,n,1000000)]:
+            # export the data every 100000 th successfully parsed game
+            man_counter += 1
+            if man_counter in [j for j in range(0,n,100000)]:
                 df = pd.DataFrame(game_metadata)
                 print(df)
                 bullet = df[df['time_control_seconds'] < 180]
