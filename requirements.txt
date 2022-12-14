@@ -1,4 +1,6 @@
 chess
 pandas
 tqdm
-multiprocessing
+matplotlib
+seaborn
+numpy
