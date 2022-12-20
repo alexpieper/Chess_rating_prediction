@@ -7,8 +7,10 @@ import tqdm
 import multiprocessing
 import matplotlib.pyplot as plt
 from ast import literal_eval
+import json
 import time
 import datetime
+import random
 
 
 def filter_and_preprocess_data():
@@ -168,7 +170,7 @@ def filter_and_preprocess_data():
                 df = pd.DataFrame()
 
 
-def concat_batched_files():
+def clean_batched_files():
     '''
     This function should get rid of useless data,
     first concatenate the batched exports.
@@ -180,125 +182,154 @@ def concat_batched_files():
     processed_data_folder_november = os.path.join('data', 'processed', 'batched_exports_2022_11')
     processed_data_folder_october = os.path.join('data', 'processed', 'batched_exports_2022_10')
     all_games_cleaned_folder = os.path.join('data', 'processed', 'all_games_cleaned')
+    batched_cleaned_folder = os.path.join('data', 'processed', 'clean_batched_exports')
     # TODO: adjust these values, based on histograms of the umber of moves
     limit_map = {
         'classical': {'upper': 100,
-                      'lower': 32},
-        'bullet': {'upper': 100,
-                   'lower': 32},
+                      'lower': 30},
+        'bullet': {'upper': 80,
+                   'lower': 30},
         'rapid': {'upper': 100,
-                  'lower': 32},
+                  'lower': 30},
         'blitz': {'upper': 100,
-                  'lower': 32},
+                  'lower': 30},
     }
     # to save memory, we make first all the classicla, then rapid etc.
-    n_november = 151
-    n_october = 161
-    n_november = 10
-    n_october = 10
+    n_november = 150
+    n_october = 160
+    # n_november = 10
+    # n_october = 10
 
 
-    # for category in ['classical', 'bullet', 'rapid', 'blitz']:
-    for category in ['classical']:
+    for category in ['classical', 'bullet', 'rapid', 'blitz']:
+    # for category in ['classical']:
+        for export_counter in tqdm.tqdm(range(1,n_november + n_october)):
+            if export_counter > n_november:
+                classical_file = os.path.join(processed_data_folder_october, f'{category}_{export_counter - n_november + 1}.csv')
+            else:
+                classical_file = os.path.join(processed_data_folder_november, f'{category}_{export_counter}.csv')
+            all_games = pd.read_csv(classical_file, index_col = 0, converters = {'all_evaluations': literal_eval, 'all_clocks': literal_eval})
+
+
+            # all_games.to_csv(os.path.join(all_games_raw_folder, f'{category}.csv'))
+
+
+
+
+            # all_games = pd.read_csv(os.path.join(all_games_raw_folder, f'{category}.csv'), index_col = 0)
+            #############################
+            # Target variable and cleaning of unnessecary data
+            # we only want games, that have a maximum elo difference of 200
+            all_games['elo_diff'] = abs(all_games['black_elo'] - all_games['white_elo'])
+            all_games = all_games[all_games['elo_diff'] <= 200]
+            # print(all_games.shape)
+            # # plt.hist(all_games['number_of_moves'],bins = 20 )
+            # # plt.savefig(f'{category}.png')
+            # # continue
+            # this number should change from category to category
+            all_games = all_games[(all_games['number_of_moves'] <= limit_map[category]['upper']) & (all_games['number_of_moves'] <= limit_map[category]['upper'])]
+            all_games['average_elo'] = 0.5 * (all_games['black_elo'] + all_games['white_elo'])
+            all_games = all_games[['average_elo', 'termination', 'opening',
+                       'opening_high_level', 'time_control_increment','first_white_move', 'first_black_move',
+                       'number_of_moves', 'number_of_checks', 'white_castling',
+                       'black_castling', 'number_of_captures', 'knight_moves', 'bishop_moves',
+                       'rook_moves', 'queen_moves', 'king_moves', 'pawn_moves',
+                       'number_of_blunders', 'number_of_bad_moves', 'number_of_dubious_moves',
+                       'evaluation_variance', 'evaluation_iqr', 'evaluation_range',
+                       'all_moves', 'all_evaluations', 'all_clocks']]
+
+
+            #############################
+            # encoding of categories
+            # problem: dropping the low level opening, results in a massive loss of explainability, but that would add 1100 columns of data
+            # one hot encoding is not an option
+            # try binary encoding for these, or frequency encoding
+
+            # ONE HOT:
+            # for categorical in ['opening', 'first_white_move', 'first_black_move']:
+            for categorical in ['first_black_move', 'first_white_move', 'opening_high_level', 'termination', 'opening']:
+                one_hot_df = pd.get_dummies(all_games[categorical])
+                if categorical == 'opening_high_level':
+                    all_games = all_games.join(one_hot_df.add_suffix('_high_level'))
+                else:
+                    all_games = all_games.join(one_hot_df)
+
+
+            # FREQUENCY:
+            # this is def. wrong as the mapping in each batch will be different
+            # for categorical in ['first_black_move', 'first_white_move', 'termination', 'opening']:
+            # for categorical in []:
+            #     freq = all_games[categorical].value_counts()
+            #     # Map the categories to their frequencies
+            #     all_games[categorical] = all_games[categorical].map(freq)
+
+            #############################
+            # encoding of the lists (clock, and eval)
+            # do it with iterrows()
+            eval_columns = [f'eval_{i}' for i in range(limit_map[category]['upper'])]
+            clock_columns = [f'clock_{i}' for i in range(limit_map[category]['upper'])]
+            eval_lists = []
+            clock_lists = []
+
+            # here we add padding to the timeseries
+            # for index, row in all_games.iterrows():
+            for evals in all_games['all_evaluations']:
+                parsed_eval = [-100 if '#-' in i else (100 if '#' in i else float(i)) for i in evals]
+                eval_lists += [parsed_eval + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_eval))]]
+            for (clocks, increment) in zip(all_games['all_clocks'], all_games['time_control_increment']):
+                # the datetime module was too slow
+                timestamps_dt = [int(ts[5:7]) + 60*int(ts[2:4]) + 3600*int(ts[0]) for ts in clocks]
+                parsed_clock = [int(t1 - t2 + int(increment)) for t1, t2 in zip(timestamps_dt[:-1], timestamps_dt[2:])]
+                clock_lists += [parsed_clock + [0 for i in range(limit_map[category]['upper'] - len(parsed_clock))]]
+
+            eval_df = pd.DataFrame(eval_lists, columns = eval_columns)
+            clock_df = pd.DataFrame(clock_lists, columns = clock_columns)
+
+            all_games = all_games.drop(['time_control_increment', 'first_black_move', 'first_white_move', 'all_moves', 'all_evaluations', 'all_clocks', 'opening_high_level', 'termination', 'opening'], axis = 1)
+            all_games = pd.concat([all_games.reset_index(drop=True), eval_df, clock_df], axis = 1)
+
+
+            # here we export it into the cleanest file
+            all_games.to_csv(os.path.join(batched_cleaned_folder, f'{category}_{export_counter}.csv'))
+
+
+def concat_clean_batched_files():
+    batched_cleaned_folder = os.path.join('data', 'processed', 'clean_batched_exports')
+    all_games_cleaned_folder = os.path.join('data', 'processed', 'all_games_clean')
+    n_total = 309
+    # n_total = 6
+    for category in ['classical', 'bullet', 'rapid', 'blitz']:
+    # for category in ['classical']:
         all_games = pd.DataFrame()
-        for export_counter in range(1,n_november):
-            classical_file = os.path.join(processed_data_folder_november, f'{category}_{export_counter}.csv')
+        for export_counter in range(1,n_total):
+            classical_file = os.path.join(batched_cleaned_folder, f'{category}_{export_counter}.csv')
             if all_games.empty:
                 all_games = pd.read_csv(classical_file, index_col = 0)
             else:
                 all_games = pd.concat([all_games, pd.read_csv(classical_file, index_col = 0)], axis=0)
-            print(all_games.shape)
+        # some opening_columns are not present in other batches, therefore filling them with 0
+        all_games = all_games.fillna(0)
 
-        for export_counter in range(1, n_october):
-            classical_file = os.path.join(processed_data_folder_october, f'{category}_{export_counter}.csv')
-            all_games = pd.concat([all_games, pd.read_csv(classical_file, index_col=0)], axis=0)
-            print(all_games.shape)
+        # make the train test split
+        indices = all_games.index.tolist()
+        random.seed(42)
+        random.shuffle(indices)
 
-        # all_games.to_csv(os.path.join(all_games_raw_folder, f'{category}.csv'))
+        # i made it 60%, because the data is already soo large, the smaller the train set, the better for computational effort
+        split_index = int(len(indices) * (0.6))
+        train_indices = indices[:split_index]
+        test_indices = indices[split_index:]
+        train = all_games.loc[train_indices]
+        test = all_games.loc[test_indices]
+        train.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_train.csv'))
+        test.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_test.csv'))
 
-
-
-
-        # all_games = pd.read_csv(os.path.join(all_games_raw_folder, f'{category}.csv'), index_col = 0)
-        print(all_games.columns)
-        print(all_games.iloc[0])
-        #############################
-        # Target variable and cleaning of unnessecary data
-        all_games['elo_diff'] = abs(all_games['black_elo'] - all_games['white_elo'])
-        print(all_games.shape)
-        # plt.hist(all_games['number_of_moves'],bins = 20 )
-        # plt.show()
-        # this number should change from category to category
-        all_games = all_games[(all_games['number_of_moves'] <= limit_map[category]['upper']) & (all_games['number_of_moves'] <= limit_map[category]['upper'])]
-        all_games = all_games[all_games['elo_diff'] <= 200]
-        all_games['average_elo'] = 0.5 * (all_games['black_elo'] + all_games['white_elo'])
-        # we only want games, that have a maximum elo difference of 200
-        all_games = all_games[['average_elo', 'termination', 'opening',
-                   'opening_high_level', 'first_white_move', 'first_black_move',
-                   'number_of_moves', 'number_of_checks', 'white_castling',
-                   'black_castling', 'number_of_captures', 'knight_moves', 'bishop_moves',
-                   'rook_moves', 'queen_moves', 'king_moves', 'pawn_moves',
-                   'number_of_blunders', 'number_of_bad_moves', 'number_of_dubious_moves',
-                   'evaluation_variance', 'evaluation_iqr', 'evaluation_range',
-                   'all_moves', 'all_evaluations', 'all_clocks']]
-
-
-        #############################
-        # encoding of categories
-        # problem: dropping the low level opening, results in a massive loss of explainability, but that would add 1100 columns of data
-        # one hot encoding is not an option
-        # try binary encoding for these, or frequency encoding
-
-        # ONE HOT:
-        # for categorical in ['opening', 'first_white_move', 'first_black_move']:
-        start = time.time()
-        for categorical in ['first_black_move', 'first_white_move']:
-            one_hot_df = pd.get_dummies(all_games[categorical])
-            all_games = all_games.join(one_hot_df)
-        end = time.time()
-        print(start - end)
-
-        # FREQUENCY:
-        # for categorical in ['first_black_move', 'first_white_move', 'termination', 'opening']:
-        start = time.time()
-        for categorical in ['termination', 'opening', 'opening_high_level']:
-            freq = all_games[categorical].value_counts()
-            # Map the categories to their frequencies
-            all_games[categorical] = all_games[categorical].map(freq)
-        end = time.time()
-        print(start - end)
-
-        #############################
-        # encoding of the lists (clock, and eval)
-        # do it with iterrows()
-        eval_columns = [f'eval_{i}' for i in range(limit_map[category]['upper'])]
-        clock_columns = [f'clock_{i}' for i in range(limit_map[category]['upper'])]
-        eval_lists = []
-        clock_lists = []
-        start = time.time()
-        for index, row in all_games.iterrows():
-            parsed_eval = [-100 if '#-' in i else (100 if '#' in i else float(i)) for i in literal_eval(row['all_evaluations'])]
-            # here we add padding to the timeseries
-            eval_lists += [parsed_eval + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_eval))]]
-            timestamps_dt = [datetime.datetime.strptime(ts, '%H:%M:%S') for ts in literal_eval(row['all_clocks'])]
-            parsed_clock = [abs(int((t2 - t1).total_seconds())) for t1, t2 in zip(timestamps_dt[:-1], timestamps_dt[2:])]
-            clock_lists += [parsed_clock + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_clock))]]
-
-        eval_df = pd.DataFrame(eval_lists, columns = eval_columns)
-        clock_df = pd.DataFrame(clock_lists, columns = clock_columns)
-
-        all_games = pd.concat([all_games.reset_index(drop=True), eval_df, clock_df], axis = 1)
-        end = time.time()
-        print(start - end)
-        all_games = all_games.drop(['first_black_move', 'first_white_move', 'all_moves', 'all_evaluations', 'all_clocks'], axis = 1)
-
-
-        # here we export it into the cleanest file
-        all_games.to_csv(os.path.join(all_games_cleaned_folder, f'{category}.csv'))
+    # also make the train test split here
 
 
 
 
 if __name__ == '__main__':
     # filter_and_preprocess_data()
-    concat_batched_files()
+    clean_batched_files()
+    concat_clean_batched_files()
