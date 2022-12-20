@@ -274,7 +274,7 @@ def clean_batched_files():
             # here we add padding to the timeseries
             # for index, row in all_games.iterrows():
             for evals in all_games['all_evaluations']:
-                parsed_eval = [-100 if '#-' in i else (100 if '#' in i else float(i)) for i in evals]
+                parsed_eval = [-40 if '#-' in i else (40 if '#' in i else (40 if float(i) > 40 else (-40 if flost(i) < -40 else float(i)))) for i in evals]
                 eval_lists += [parsed_eval + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_eval))]]
             for (clocks, increment) in zip(all_games['all_clocks'], all_games['time_control_increment']):
                 # the datetime module was too slow
