@@ -274,7 +274,7 @@ def clean_batched_files():
             # here we add padding to the timeseries
             # for index, row in all_games.iterrows():
             for evals in all_games['all_evaluations']:
-                parsed_eval = [-40 if '#-' in i else (40 if '#' in i else (40 if float(i) > 40 else (-40 if flost(i) < -40 else float(i)))) for i in evals]
+                parsed_eval = [-40 if '#-' in i else (40 if '#' in i else (40 if float(i) > 40 else (-40 if float(i) < -40 else float(i)))) for i in evals]
                 eval_lists += [parsed_eval + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_eval))]]
             for (clocks, increment) in zip(all_games['all_clocks'], all_games['time_control_increment']):
                 # the datetime module was too slow
@@ -297,39 +297,54 @@ def concat_clean_batched_files():
     batched_cleaned_folder = os.path.join('data', 'processed', 'clean_batched_exports')
     all_games_cleaned_folder = os.path.join('data', 'processed', 'all_games_clean')
     n_total = 309
-    # n_total = 6
+    # n_total = 15
     for category in ['classical', 'bullet', 'rapid', 'blitz']:
+    # for category in ['bullet', 'rapid', 'blitz']:
     # for category in ['classical']:
-        all_games = pd.DataFrame()
-        for export_counter in range(1,n_total):
+        all_games_list = []
+        for export_counter in tqdm.tqdm(range(1,n_total)):
             classical_file = os.path.join(batched_cleaned_folder, f'{category}_{export_counter}.csv')
-            if all_games.empty:
-                all_games = pd.read_csv(classical_file, index_col = 0)
-            else:
-                all_games = pd.concat([all_games, pd.read_csv(classical_file, index_col = 0)], axis=0)
+            game_tmp = pd.read_csv(classical_file, index_col=0)
+            # efficiency gain thorugh the following: 1.45 GB = 787 MB
+            int_16_columns = [i for i in game_tmp.columns if 'clock_' in i] + ['number_of_moves', 'number_of_checks', 'white_castling', 'black_castling', 'number_of_captures', 'knight_moves', 'bishop_moves','rook_moves', 'queen_moves', 'king_moves', 'pawn_moves','number_of_blunders','number_of_bad_moves', 'number_of_dubious_moves']
+            int_8_columns = [i for i in game_tmp.columns if ((i not in ['average_elo', 'evaluation_variance', 'evaluation_iqr', 'evaluation_range']) and (not i in int_16_columns) and (not 'eval_' in i))]
+            game_tmp[int_16_columns] = game_tmp[int_16_columns].astype('Int16')
+            game_tmp[int_8_columns] = game_tmp[int_8_columns].astype('Int8')
+            all_games_list += [game_tmp]
+        all_games = pd.concat(all_games_list)
+
         # some opening_columns are not present in other batches, therefore filling them with 0
+        print(all_games.shape)
         all_games = all_games.fillna(0)
+        all_games.index = range(all_games.shape[0])
 
         # make the train test split
+        print('randomized indices')
         indices = all_games.index.tolist()
         random.seed(42)
         random.shuffle(indices)
 
         # i made it 60%, because the data is already soo large, the smaller the train set, the better for computational effort
+        print('applying indices')
         split_index = int(len(indices) * (0.6))
         train_indices = indices[:split_index]
         test_indices = indices[split_index:]
-        train = all_games.loc[train_indices]
-        test = all_games.loc[test_indices]
-        train.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_train.csv'))
-        test.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_test.csv'))
+        train = all_games.loc[train_indices,:]
+        test = all_games.loc[test_indices,:]
+
+        print('start exporting train')
+        # the exportin consumed 150 GB of RAM, therefore we export in batches
+        train.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_train.csv'), chunksize = 50000)
+        print('start exporting test')
+        test.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_test.csv'), chunksize = 50000)
 
     # also make the train test split here
 
 
-
+# 1.45 GB classical train before
+# 787 MB now
 
 if __name__ == '__main__':
     # filter_and_preprocess_data()
-    clean_batched_files()
+    # clean_batched_files()
     concat_clean_batched_files()
