@@ -37,12 +37,12 @@ class DataAnalysis:
     def run_everything(self):
         self.histogram_of_rating()
         self.plot_numerical_variables()
-        # self.plot_rating_vs_all()
+        self.plot_rating_vs_all()
         self.plot_timeseries_vs_rating()
 
     def histogram_of_rating(self):
         fig, ax = plt.subplots(1, 1, figsize=(12, 7))
-        ax.hist(self.data['average_elo'], edgecolor = 'black')
+        ax.hist(self.data['average_elo'], edgecolor = 'black', bins = 15)
         plt.xlabel('Rating')
         plt.ylabel('Absolute Frequency')
         ax.set_title('Histogram of the Rating')
@@ -63,6 +63,8 @@ class DataAnalysis:
 
 
     def plot_rating_vs_all(self):
+        # this was using the data pre one-hot encoding, therefore not working anymore
+        return
         fig, ax = plt.subplots(5, 4, figsize=(20, 15))
 
         columns_of_interest = ['opening',
@@ -100,7 +102,7 @@ class DataAnalysis:
 
         # print(self.data)
         fig, ax = plt.subplots(2,1, figsize=(12, 9), sharex=True)
-        for index, row in self.data.iloc[:2000].iterrows():
+        for index, row in self.data.iloc[:3000].iterrows():
             if (row['rating_bucket'] > 1) and (row['rating_bucket'] < 99):
                 continue
             # evals = [float(i) for i in row[[f'eval_{j}']) if not '#' in i]
@@ -111,12 +113,12 @@ class DataAnalysis:
                     break
             evals = evals[:i+1]
             # TODO: remove once other script ran through
-            evals = [40 if int(i) == 100 else (-40 if int(i) == -100 else i) for i in evals]
+            # evals = [40 if int(i) == 100 else (-40 if int(i) == -100 else i) for i in evals]
             # here we want to strip the padded 0's away
             if row['rating_bucket'] <= 1:
-                ax[0].plot(range(len(evals)), evals, alpha = 0.5, linewidth=1, color = 'tab:red')
+                ax[0].plot(range(len(evals)), evals, alpha = 0.4, linewidth=1, color = 'tab:red')
             else:
-                ax[1].plot(range(len(evals)), evals, alpha = 0.5, linewidth=1, color = 'tab:green')
+                ax[1].plot(range(len(evals)), evals, alpha = 0.4, linewidth=1, color = 'tab:green')
         ax[0].set_ylim([-50,50])
         ax[0].set_xlim([0, 60])
         ax[1].set_ylim([-50, 50])
@@ -132,6 +134,38 @@ class DataAnalysis:
         export_file = os.path.join(self.plot_export_folder, 'eval_timeseries.png')
         plt.savefig(export_file)
 
+        fig, ax = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
+        for index, row in self.data.iloc[:20000].iterrows():
+            # only use longer games, to make the difference more obvious
+            if row['number_of_moves'] < 80:
+                continue
+            if (row['rating_bucket'] > 1) and (row['rating_bucket'] < 99):
+                continue
+            # evals = [float(i) for i in row[[f'eval_{j}']) if not '#' in i]
+            evals = row[[f'clock_{j}' for j in range(100)]]
+            # delete the padded 0'es
+            for i in range(len(evals) - 1, -1, -1):
+                if evals[i] != 0:
+                    break
+            evals = evals[:i + 1]
+            # here we want to strip the padded 0's away
+            if row['rating_bucket'] <= 1:
+                ax[0].plot(range(len(evals)), list(np.cumsum(evals)), alpha=0.4, linewidth=1, color='tab:red')
+            else:
+                ax[1].plot(range(len(evals)), list(np.cumsum(evals)), alpha=0.4, linewidth=1, color='tab:green')
+        ax[0].set_ylim([0, 5000])
+        ax[0].set_xlim([0, 100])
+        ax[1].set_ylim([0, 5000])
+        ax[1].set_xlim([0, 100])
+        ax[0].set_ylabel('Cumulative time spent')
+        ax[1].set_ylabel('Cumulative time spent')
+        ax[1].set_xlabel('Move Number')
+        ax[0].set_title('Cumulative time spent over lowest rated 1% of games')
+        ax[1].set_title('Cumulative time spent over highest rated 1% of games')
+
+        fig.tight_layout()
+        export_file = os.path.join(self.plot_export_folder, 'clock_timeseries.png')
+        plt.savefig(export_file)
 
 
 if __name__ == '__main__':
