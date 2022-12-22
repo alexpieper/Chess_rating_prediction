@@ -5,7 +5,7 @@ import os
 import pickle
 
 import xgboost as xgb
-from keras.layers import LSTM, Dense
+from keras.layers import LSTM, Dense, Dropout
 from keras.models import Sequential
 from keras.models import load_model
 
@@ -111,26 +111,74 @@ class LinearRegressionModel:
 
 
 class LSTMRegression:
-    def __init__(self, input_shape, output_shape):
+    def __init__(self, game_type, n_rows):
+        self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
+        self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
+        base_dir = os.path.join('trained_models', 'lstm_only_ts', str(n_rows))
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+        self.model_path = os.path.join(base_dir, f'{game_type}_model.pkl')
+        self.evaluation_path = os.path.join(base_dir, f'{game_type}_eval.csv')
+        self.coefficients_path = os.path.join(base_dir, f'{game_type}_coefs.csv')
+        self.valid_columns_file = os.path.join(base_dir, f'{game_type}_valid_cols.txt')
+        self.nrows = n_rows
+        self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
+
+
+    def train(self):
+        epochs = 20
+        batch_size = 256
+
+        print('reading train')
+        self.train_df = pd.read_csv(self.train_file, nrows=self.nrows, usecols=self.usefuls_cols)
+        X_train = self.train_df.drop(columns=['average_elo'])
+        y_train = self.train_df['average_elo']
+        print('start training')
+        input_shape = (X_train.shape[1],1)
+        output_shape = 1
+
         self.model = Sequential()
-        self.model.add(LSTM(units=32, input_shape=input_shape))
+        self.model.add(LSTM(units=32, input_shape=input_shape, return_sequences = True))
+        # self.model.add(LSTM(units=32))
+        self.model.add(Dropout(0.3))
         self.model.add(Dense(units=output_shape))
         self.model.compile(loss='mean_squared_error', optimizer='adam')
+        self.model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size)
+        self.train_df = pd.DataFrame()
+        X_train = pd.DataFrame()
+        y_train = pd.DataFrame()
 
-    def fit(self, X, y, epochs=10, batch_size=32, validation_data=None):
-        self.model.fit(X, y, epochs=epochs, batch_size=batch_size, validation_data=validation_data)
+    def evaluate(self):
+        print('reading test')
+        self.test_df = pd.read_csv(self.test_file, nrows=self.nrows, usecols=self.usefuls_cols)
+        print('starting eval')
+        X_test = self.test_df.drop(columns=['average_elo'])
+        y_test = self.test_df['average_elo']
+        y_pred = self.model.predict(X_test)
 
-    def predict(self, X):
-        return self.model.predict(X)
+        median_abs_error = np.median([abs(i - j) for i, j in zip(y_pred, y_test.tolist())])
+        mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred, y_test.tolist())])
+        dummy_guess = np.mean(y_test.tolist())
+        median_absolute_dummy_error = np.median([abs(i - dummy_guess) for i in y_test.tolist()])
+        mean_absolute_dummy_error = np.mean([abs(i - dummy_guess) for i in y_test.tolist()])
 
-    def evaluate(self, X, y):
-        return self.model.evaluate(X, y)
+        # todo: add benchmark: always to guess the median.
+        self.eval_measures = {'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
+                              'Mean Absolute Dummy Error': mean_absolute_dummy_error,
+                              'Median Absolute Dummy Error': median_absolute_dummy_error
+                              }
 
-    def save(self, filepath):
-        self.model.save(filepath)
+    def save_and_print_evaluation_outcome(self):
+        measure_df = pd.DataFrame(self.eval_measures.items(), columns=['Measure', 'Value'])
+        measure_df.to_csv(self.evaluation_path)
+        for measure, value in self.eval_measures.items():
+            print(f'{measure}: {value:.2f}')
 
-    def load(self, filepath):
-        self.model = load_model(filepath)
+    def save(self):
+        self.model.save(self.model_path)
+
+    def load(self):
+        self.model = load_model(self.model_path)
 
 
 
@@ -150,28 +198,10 @@ class XGBoostRegression:
         self.usefuls_cols = [f'eval_{i}' for i in range(limit)] + [f'clock_{i}' for i in range(limit)] + ['average_elo']
         self.model = xgb.XGBRegressor()
 
-    def clean_dataset(self, df, load_new):
-        try:
-            with open(self.valid_columns_file) as file:
-                self.valid_columns  = [line.rstrip() for line in file]
-        except:
-            self.valid_columns = []
-
-        if load_new:
-            sums = df.abs().sum(axis=0)
-            self.valid_columns = [i for i in df.columns if (sums[i] > 30)]
-            df = df[self.valid_columns]
-            with open(self.valid_columns_file, 'w') as f:
-                for line in self.valid_columns:
-                    f.write(f"{line}\n")
-        else:
-            df = df[self.valid_columns]
-        return df
 
     def train(self):
         print('reading train')
         self.train_df = pd.read_csv(self.train_file, nrows=self.nrows, usecols = self.usefuls_cols)
-        self.train_df = self.clean_dataset(self.train_df, True)
         X_train = self.train_df.drop(columns=['average_elo'])
         y_train = self.train_df['average_elo']
         print('start training')
@@ -337,13 +367,14 @@ if __name__ == '__main__':
     # LSTM
     game_types = ['classical', 'bullet', 'rapid', 'blitz']
     for game_type in game_types:
-        model = LSTMModel(game_type, 1000000)
+        model = LSTMRegression(game_type, 50000)
         model.train()
         model.save()
         model.load()
         model.evaluate()
         print(f'Gametype: {game_type}')
         model.save_and_print_evaluation_outcome()
+
 
     #
     #
