@@ -8,6 +8,8 @@ import xgboost as xgb
 from keras.layers import LSTM, Dense, Dropout
 from keras.models import Sequential
 from keras.models import load_model
+import tensorflow as tf
+import tensorflow_probability as tfp
 
 
 class LinearRegressionModel:
@@ -123,27 +125,38 @@ class LSTMRegression:
         self.valid_columns_file = os.path.join(base_dir, f'{game_type}_valid_cols.txt')
         self.nrows = n_rows
         self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
+        # self.usefuls_cols = [f'eval_{i}' for i in range(60)] + ['average_elo']
 
+    def median_abs_error(self, y_true, y_pred):
+        abs_diff = abs(y_true - y_pred)
+        # this is for the median
+        return tfp.stats.percentile(abs_diff, 50.0, interpolation='midpoint')
 
     def train(self):
-        epochs = 20
+        epochs = 250
         batch_size = 256
 
         print('reading train')
         self.train_df = pd.read_csv(self.train_file, nrows=self.nrows, usecols=self.usefuls_cols)
+        self.validation_df = self.train_df[int(self.nrows/1.5):]
+        self.train_df = self.train_df[:int(self.nrows/1.5)]
         X_train = self.train_df.drop(columns=['average_elo'])
+        X_validation = self.validation_df.drop(columns=['average_elo'])
         y_train = self.train_df['average_elo']
+        y_validation = self.validation_df['average_elo']
+        self.train_mean = np.mean(y_train)
+        y_train = y_train - self.train_mean
+        y_validation = y_validation - self.train_mean
         print('start training')
         input_shape = (X_train.shape[1],1)
         output_shape = 1
 
         self.model = Sequential()
-        self.model.add(LSTM(units=32, input_shape=input_shape, return_sequences = True))
-        # self.model.add(LSTM(units=32))
-        self.model.add(Dropout(0.3))
-        self.model.add(Dense(units=output_shape))
-        self.model.compile(loss='mean_squared_error', optimizer='adam')
-        self.model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size)
+        self.model.add(LSTM(units=32, input_shape=input_shape))
+        self.model.add(Dropout(0.2))
+        self.model.add(Dense(output_shape))
+        self.model.compile(loss='mean_squared_error', optimizer='adam', metrics=[self.median_abs_error])
+        self.model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, validation_data=(X_validation, y_validation))
         self.train_df = pd.DataFrame()
         X_train = pd.DataFrame()
         y_train = pd.DataFrame()
@@ -155,7 +168,7 @@ class LSTMRegression:
         X_test = self.test_df.drop(columns=['average_elo'])
         y_test = self.test_df['average_elo']
         y_pred = self.model.predict(X_test)
-
+        y_pred = [i + self.train_mean for i in y_pred.flatten().tolist()]
         median_abs_error = np.median([abs(i - j) for i, j in zip(y_pred, y_test.tolist())])
         mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred, y_test.tolist())])
         dummy_guess = np.mean(y_test.tolist())
@@ -178,7 +191,7 @@ class LSTMRegression:
         self.model.save(self.model_path)
 
     def load(self):
-        self.model = load_model(self.model_path)
+        self.model = load_model(self.model_path, custom_objects = {'median_abs_error': self.median_abs_error})
 
 
 
@@ -366,15 +379,27 @@ if __name__ == '__main__':
 
     # LSTM
     game_types = ['classical', 'bullet', 'rapid', 'blitz']
+    game_types = ['bullet', 'blitz']
+    n_rows = 300000
     for game_type in game_types:
-        model = LSTMRegression(game_type, 50000)
+        if game_type == 'classical':
+            n_rows = 200000
+        else:
+            n_rows = 300000
+        model = LSTMRegression(game_type, n_rows)
         model.train()
         model.save()
         model.load()
         model.evaluate()
-        print(f'Gametype: {game_type}')
+        print(f'Gametype: {game_type}, n_rows: {n_rows}')
         model.save_and_print_evaluation_outcome()
+        # thes are f
 
+
+    # classical, 300000 nrows, 200 epochs
+    # bullet, 300000 nrows, 250 epochs
+    # rapid, 300000 nrows, 200 epochs
+    # blitz, 300000 nrows, 250 epochs
 
     #
     #

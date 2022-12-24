@@ -7,3 +7,7 @@ numpy
 sklearn
 scikit-learn
 pickle
+keras
+tensorflow
+xgboost
+tensorflow_probability
