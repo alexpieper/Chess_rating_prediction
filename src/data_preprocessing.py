@@ -15,15 +15,24 @@ import random
 
 def filter_and_preprocess_data():
     '''
+    This function reads the list of PGN Games from Lichess.org preprocesses them
+    after that we store them in a pandas dataframe, which we export in a batched manner, to save memory.
+    Parameter:
+        - we are only interested in the ones, that have clock AND Evaluation information
+        -
+    Metrics/Notes:
     current speed of the loop is ~ 600 iterations/second
     this runs for ~ 40 hrs per 90.000.000 games (all games played in November 2022 on lichess.org)
     :return:
     raw data per month >200 GB
-    after processing (this function): 15 GB per month
+    after processing (this function): ~15 GB per month
     '''
     raw_data_folder = os.path.join('data', 'raw')
     processed_data_folder = os.path.join('data', 'processed')
+    # october:
     filename = os.path.join(raw_data_folder, 'lichess_db_standard_rated_2022-10.pgn')
+    # november:
+    filename = os.path.join(raw_data_folder, 'lichess_db_standard_rated_2022-11.pgn')
 
     game_metadata = []
     n = 92629656
@@ -172,16 +181,15 @@ def filter_and_preprocess_data():
 
 def clean_batched_files():
     '''
-    This function should get rid of useless data,
-    first concatenate the batched exports.
-    Then encode the categroical features (i.e. with one-hot-encoding) (termination, opening, opneing_high_level, black_first_move, white_first_move)
-    and encode the lists into numerical features, using padding and translations from #3 into a number
-    also encode the clock as in 'seconds_used'
+    This function gets rid of useless data and transforms the existing data.
+    It encodes the categroical features (i.e. with one-hot-encoding) (termination, opening, opneing_high_level, black_first_move, white_first_move)
+    and encode the lists into numerical features, using padding with 0
+    and translates from evaluation from #3 into a number
+    also encode the clock from 'HH:MM:SS:' into 'seconds_used_for_move'
     :return:
     '''
     processed_data_folder_november = os.path.join('data', 'processed', 'batched_exports_2022_11')
     processed_data_folder_october = os.path.join('data', 'processed', 'batched_exports_2022_10')
-    all_games_cleaned_folder = os.path.join('data', 'processed', 'all_games_cleaned')
     batched_cleaned_folder = os.path.join('data', 'processed', 'clean_batched_exports')
     # TODO: adjust these values, based on histograms of the umber of moves
     limit_map = {
@@ -223,9 +231,11 @@ def clean_batched_files():
             all_games['elo_diff'] = abs(all_games['black_elo'] - all_games['white_elo'])
             all_games = all_games[all_games['elo_diff'] <= 200]
             # print(all_games.shape)
+            # histogram of the number of moves, to get a good sense
             # # plt.hist(all_games['number_of_moves'],bins = 20 )
             # # plt.savefig(f'{category}.png')
-            # # continue
+            # plt.close()
+
             # this number should change from category to category
             all_games = all_games[(all_games['number_of_moves'] <= limit_map[category]['upper']) & (all_games['number_of_moves'] <= limit_map[category]['upper'])]
             all_games['average_elo'] = 0.5 * (all_games['black_elo'] + all_games['white_elo'])
@@ -240,11 +250,6 @@ def clean_batched_files():
 
 
             #############################
-            # encoding of categories
-            # problem: dropping the low level opening, results in a massive loss of explainability, but that would add 1100 columns of data
-            # one hot encoding is not an option
-            # try binary encoding for these, or frequency encoding
-
             # ONE HOT:
             # for categorical in ['opening', 'first_white_move', 'first_black_move']:
             for categorical in ['first_black_move', 'first_white_move', 'opening_high_level', 'termination', 'opening']:
@@ -255,7 +260,7 @@ def clean_batched_files():
                     all_games = all_games.join(one_hot_df)
 
 
-            # FREQUENCY:
+            # FREQUENCY Encoding, (not used):
             # this is def. wrong as the mapping in each batch will be different
             # for categorical in ['first_black_move', 'first_white_move', 'termination', 'opening']:
             # for categorical in []:
@@ -264,15 +269,12 @@ def clean_batched_files():
             #     all_games[categorical] = all_games[categorical].map(freq)
 
             #############################
-            # encoding of the lists (clock, and eval)
-            # do it with iterrows()
             eval_columns = [f'eval_{i}' for i in range(limit_map[category]['upper'])]
             clock_columns = [f'clock_{i}' for i in range(limit_map[category]['upper'])]
             eval_lists = []
             clock_lists = []
 
             # here we add padding to the timeseries
-            # for index, row in all_games.iterrows():
             for evals in all_games['all_evaluations']:
                 parsed_eval = [-40 if '#-' in i else (40 if '#' in i else (40 if float(i) > 40 else (-40 if float(i) < -40 else float(i)))) for i in evals]
                 eval_lists += [parsed_eval + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_eval))]]
@@ -294,13 +296,15 @@ def clean_batched_files():
 
 
 def concat_clean_batched_files():
+    '''
+    this function concatenates the batched exports, splits into training and testing and export those as large .csv files.
+    also from int64 to int8/16 was applied to save ~ 50% of storage
+    :return:
+    '''
     batched_cleaned_folder = os.path.join('data', 'processed', 'clean_batched_exports')
     all_games_cleaned_folder = os.path.join('data', 'processed', 'all_games_clean')
     n_total = 309
-    # n_total = 15
     for category in ['classical', 'bullet', 'rapid', 'blitz']:
-    # for category in ['bullet', 'rapid', 'blitz']:
-    # for category in ['classical']:
         all_games_list = []
         for export_counter in tqdm.tqdm(range(1,n_total)):
             classical_file = os.path.join(batched_cleaned_folder, f'{category}_{export_counter}.csv')
@@ -338,13 +342,10 @@ def concat_clean_batched_files():
         print('start exporting test')
         test.to_csv(os.path.join(all_games_cleaned_folder, f'{category}_test.csv'), chunksize = 50000)
 
-    # also make the train test split here
-
-
 # 1.45 GB classical train before
 # 787 MB now
 
 if __name__ == '__main__':
-    # filter_and_preprocess_data()
-    # clean_batched_files()
+    filter_and_preprocess_data()
+    clean_batched_files()
     concat_clean_batched_files()
