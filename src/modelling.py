@@ -114,6 +114,7 @@ class LinearRegressionModel:
 
 class LSTMRegression:
     def __init__(self, game_type, n_rows):
+        print(game_type)
         self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
         base_dir = os.path.join('trained_models', 'lstm_only_ts', str(n_rows))
@@ -145,6 +146,9 @@ class LSTMRegression:
         y_train = self.train_df['average_elo']
         y_validation = self.validation_df['average_elo']
         self.train_mean = np.mean(y_train)
+        print(self.train_mean)
+
+        err
         y_train = y_train - self.train_mean
         y_validation = y_validation - self.train_mean
         print('start training')
@@ -267,7 +271,7 @@ class CombinedModel():
     Here we want to load two trained models (one linear regression, one XGBoost), average their predicted values for the test set and see if that is better than either model.
     limit 60 is good
     '''
-    def __init__(self, game_type, n_rows):
+    def __init__(self, game_type, n_rows, model_type):
 
 
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
@@ -278,36 +282,62 @@ class CombinedModel():
         self.load_linear_model()
         with open(self.valid_columns_file) as file:
             self.valid_columns = [line.rstrip() for line in file]
+        self.model_type = model_type
+        if model_type == 'xgboost':
+            xgb_base_dir = os.path.join('trained_models', 'xgboost_only_ts', str(n_rows), '60')
+            self.xbg_model_path = os.path.join(xgb_base_dir, f'{game_type}_model.pkl')
+            self.valid_columns_file = os.path.join(xgb_base_dir, f'{game_type}_valid_cols.txt')
+            self.nrows = n_rows
+            self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
+            self.load_xgb()
+        elif model_type == 'lstm':
+            self.train_means = {
+                'bullet': 1502.622895,
+                'blitz': 1613.1635275,
+                'rapid': 1562.077505,
+                'classical': 1577.9704829927161,
+            }
+            self.train_mean = self.train_means[game_type]
+            lstm_base_dir = os.path.join('trained_models', 'lstm_only_ts', '300000')
+            self.lstm_model_path = os.path.join(lstm_base_dir, f'{game_type}_model.pkl')
+            self.valid_columns_file = os.path.join(lstm_base_dir, f'{game_type}_valid_cols.txt')
+            self.nrows = n_rows
+            self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
+            self.load_lstm()
 
-        xgb_base_dir = os.path.join('trained_models', 'xgboost_only_ts', str(n_rows), '60')
-        self.xbg_model_path = os.path.join(xgb_base_dir, f'{game_type}_model.pkl')
-        self.valid_columns_file = os.path.join(xgb_base_dir, f'{game_type}_valid_cols.txt')
-        self.nrows = n_rows
-        self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
-        self.load_xgb()
-
-        base_dir = os.path.join('trained_models', 'combined_model', str(n_rows))
+        base_dir = os.path.join('trained_models', 'combined_model', model_type, str(n_rows))
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
         self.evaluation_path = os.path.join(base_dir, f'{game_type}_eval.csv')
 
     def load_xgb(self):
         with open(self.xbg_model_path, 'rb') as f:
-            self.xgb_model = pickle.load(f)
+            self.advanced_model = pickle.load(f)
 
+    def median_abs_error(self, y_true, y_pred):
+        abs_diff = abs(y_true - y_pred)
+        # this is for the median
+        return tfp.stats.percentile(abs_diff, 50.0, interpolation='midpoint')
+
+    def load_lstm(self):
+        self.advanced_model = load_model(self.lstm_model_path, custom_objects={'median_abs_error': self.median_abs_error})
 
     def load_linear_model(self):
         with open(self.linear_model_path, 'rb') as f:
             self.linear_model = pickle.load(f)
 
     def evaluate(self):
-        # predict XGB
+        # predict advanced model
         test_df = pd.read_csv(self.test_file, nrows=self.nrows, usecols=self.usefuls_cols)
+        print(test_df.shape)
+        errr
         X_test = test_df.drop(columns=['average_elo'])
         y_test = test_df['average_elo']
-        y_pred_xgb = self.xgb_model.predict(X_test)
-        xgb_median_abs_error = np.median([abs(i - j) for i, j in zip(y_pred_xgb, y_test.tolist())])
-        xgb_mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred_xgb, y_test.tolist())])
+        y_pred_advanced = self.advanced_model.predict(X_test)
+        if self.model_type == 'lstm':
+            y_pred_advanced = [i + self.train_mean for i in y_pred_advanced.flatten().tolist()]
+        advanced_median_abs_error = np.median([abs(i - j) for i, j in zip(y_pred_advanced, y_test.tolist())])
+        advanced_mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred_advanced, y_test.tolist())])
 
         # predict Linear
         test_df = pd.read_csv(self.test_file, index_col=0, nrows=self.nrows)
@@ -319,18 +349,23 @@ class CombinedModel():
         linear_mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred_linear, y_test.tolist())])
 
         # combine both
-
-        y_pred_combined = [0.5 * (i+j) for i,j in zip(y_pred_xgb, y_pred_linear)]
+        y_pred_combined = [0.5 * (i+j) for i,j in zip(y_pred_advanced, y_pred_linear)]
         combined_median_abs_error = np.median([abs(i - j) for i, j in zip(y_pred_combined, y_test.tolist())])
         combined_mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred_combined, y_test.tolist())])
 
-        # todo: add benchmark: always to guess the median.
+        # dummy guess
+        dummy_guess = np.mean(y_test.tolist())
+        median_absolute_dummy_error = np.median([abs(i - dummy_guess) for i in y_test.tolist()])
+        mean_absolute_dummy_error = np.mean([abs(i - dummy_guess) for i in y_test.tolist()])
+
         self.eval_measures = {'Linear Median Absolute Error': linear_median_abs_error,
-                              'XGB Median Absolute Error': xgb_median_abs_error,
+                              'Advanced Median Absolute Error': advanced_median_abs_error,
                               'Combined Median Absolute Error': combined_median_abs_error,
                               'Linear Mean Absolute Error': linear_mean_abs_error,
-                              'XGB Mean Absolute Error': xgb_mean_abs_error,
+                              'Advanced Mean Absolute Error': advanced_mean_abs_error,
                               'Combined Mean Absolute Error': combined_mean_abs_error,
+                              'Dummy Mean Absolute Error': mean_absolute_dummy_error,
+                              'Dummy Median Absolute Error': median_absolute_dummy_error,
                               }
 
     def save_and_print_evaluation_outcome(self):
@@ -367,33 +402,27 @@ if __name__ == '__main__':
 
     # XGBoost:
     # game_types = ['classical', 'bullet', 'rapid', 'blitz']
-    # for limit in [10, 20, 30 ,40, 50, 60, 70, 80]:
-    #     for game_type in game_types:
-    #         model = XGBoostRegression(game_type, 1000000, limit)
-    #         model.train()
-    #         model.save()
-    #         model.load()
-    #         model.evaluate()
-    #         print(f'Gametype: {game_type}, limit = {limit}')
-    #         model.save_and_print_evaluation_outcome()
+    # for game_type in game_types:
+    #     model = XGBoostRegression(game_type, 1000000, 60)
+    #     model.train()
+    #     model.save()
+    #     model.load()
+    #     model.evaluate()
+    #     print(f'Gametype: {game_type}, limit = {limit}')
+#         model.save_and_print_evaluation_outcome()
 
     # LSTM
-    game_types = ['classical', 'bullet', 'rapid', 'blitz']
-    game_types = ['bullet', 'blitz']
-    n_rows = 300000
-    for game_type in game_types:
-        if game_type == 'classical':
-            n_rows = 200000
-        else:
-            n_rows = 300000
-        model = LSTMRegression(game_type, n_rows)
-        model.train()
-        model.save()
-        model.load()
-        model.evaluate()
-        print(f'Gametype: {game_type}, n_rows: {n_rows}')
-        model.save_and_print_evaluation_outcome()
-        # thes are f
+    # game_types = ['classical', 'bullet', 'rapid', 'blitz']
+    # n_rows = 300000
+    # for game_type in game_types:
+    #     model = LSTMRegression(game_type, n_rows)
+    #     model.train()
+    #     model.save()
+    #     model.load()
+    #     model.evaluate()
+    #     print(f'Gametype: {game_type}, n_rows: {n_rows}')
+    #     model.save_and_print_evaluation_outcome()
+    #     # thes are f
 
 
     # classical, 300000 nrows, 200 epochs
@@ -401,10 +430,24 @@ if __name__ == '__main__':
     # rapid, 300000 nrows, 200 epochs
     # blitz, 300000 nrows, 250 epochs
 
+    ########################################################
+    ############## Evaluations on 1 Mio Games ##############
+    ########################################################
+
     #
-    #
-    # game_types = ['classical', 'bullet', 'rapid', 'blitz']
-    # for game_type in game_types:
-    #     model = CombinedModel(game_type, 1000000)
-    #     model.evaluate()
-    #     model.save_and_print_evaluation_outcome()
+    # Combined with XGB
+    game_types = ['classical', 'bullet', 'rapid', 'blitz']
+    for game_type in game_types:
+        model = CombinedModel(game_type, 1000000, 'xgboost')
+        model.evaluate()
+        model.save_and_print_evaluation_outcome()
+
+
+    # Combined with LSTM
+
+    game_types = ['classical', 'bullet', 'rapid', 'blitz']
+    for game_type in game_types:
+        print(game_type)
+        model = CombinedModel(game_type, 1000000, 'lstm')
+        model.evaluate()
+        model.save_and_print_evaluation_outcome()
