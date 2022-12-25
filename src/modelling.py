@@ -13,6 +13,12 @@ import tensorflow_probability as tfp
 
 
 class LinearRegressionModel:
+    '''
+    This class represent the Linear Regression model.
+    Parameter:
+     - It only uses the non-timeseries columns (i.e. metadata like number_moves, opening, first_move etc.)
+     - It only uses the features, whose absolute sum is larger than 10. (this filters the very rare opening, as they tend to overfit to the trainin data. coefficient goes up to 10000)
+    '''
     def __init__(self, game_type, n_rows):
         self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
@@ -27,12 +33,12 @@ class LinearRegressionModel:
         self.model = LinearRegression()
 
     def clean_dataset(self, df, load_new):
-        try:
-            with open(self.valid_columns_file) as file:
-                self.valid_columns  = [line.rstrip() for line in file]
-        except:
-            self.valid_columns = []
-
+        '''
+         applies the above mentioned filtering of sparse columns and save these columns in a txt file, for the testing
+        :param df: training of testing data
+        :param load_new: whether to calculate the columns new. usually (training: True, testing: False)
+        :return: cleaned df
+        '''
         if load_new:
             sums = df.sum(axis=0)
             self.valid_columns = [i for i in df.columns if (abs(sums[i]) > 10) and not (('eval_' in i or 'clock_' in i))]
@@ -41,41 +47,59 @@ class LinearRegressionModel:
                 for line in self.valid_columns:
                     f.write(f"{line}\n")
         else:
+            with open(self.valid_columns_file) as file:
+                self.valid_columns  = [line.rstrip() for line in file]
             df = df[self.valid_columns]
         return df
 
     def train(self):
-        print('reading train')
+        '''
+        fits the model to the training data
+        :return:
+        '''
+        print('Start: reading training data')
         self.train_df = pd.read_csv(self.train_file, index_col=0, nrows=self.nrows)
         self.train_df = self.clean_dataset(self.train_df, True)
         X_train = self.train_df.drop(columns=['average_elo'])
         y_train = self.train_df['average_elo']
-        print('start training')
+        print('Start: training')
         self.model.fit(X_train, y_train)
+        # this is just to clear these variables from the memory, as they are not used anymore
         self.train_df = pd.DataFrame()
         X_train = pd.DataFrame()
         y_train = pd.DataFrame()
-        print('finished training')
 
     def save(self):
+        '''
+        exports the trained model, so it can be used later for evaluation
+        :return:
+        '''
         with open(self.model_path, 'wb') as f:
             pickle.dump(self.model, f)
 
     def load(self):
+        '''
+        loads the exported model, so it can be used for evaluation
+        :return:
+        '''
         with open(self.model_path, 'rb') as f:
             self.model = pickle.load(f)
 
     def evaluate(self):
-        print('reading test')
+        '''
+        evaluates the model on the testing data w.r.t. different evaluation metrics
+        :return:
+        '''
+        print('Start: reading testing data')
         self.test_df = pd.read_csv(self.test_file, index_col=0, nrows=self.nrows)
         self.test_df = self.clean_dataset(self.test_df, False)
-        print('starting eval')
-        # self.valid_columns = [i for i in self.test_df.columns if not ('eval_' in i or 'clock_' in i)]
+        print('Start: evaluation')
         self.test_df = self.test_df[self.valid_columns]
         X_test = self.test_df.drop(columns=['average_elo'])
         y_test = self.test_df['average_elo']
         y_pred = self.model.predict(X_test)
 
+        # calculate the errors
         median_abs_error = np.median([abs(i - j) for i,j in zip(y_pred, y_test.tolist())])
         mean_abs_error = np.mean([abs(i - j) for i,j in zip(y_pred, y_test.tolist())])
         median_squared_error = np.median([(i - j)**2 for i,j in zip(y_pred, y_test.tolist())])
@@ -86,7 +110,6 @@ class LinearRegressionModel:
         median_squared_dummy_error = np.median([(i - dummy_guess)**2 for i in y_test.tolist()])
         mean_squared_dummy_error = np.mean([(i - dummy_guess)**2 for i in y_test.tolist()])
 
-        # todo: add benchmark: always to guess the median.
         self.eval_measures = {'Mean Squared Error': mean_squared_error, 'Median Squared Error': median_squared_error,
                               'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
                               'Mean Squared Dummy Error': mean_squared_dummy_error, 'Median Squared Dummy Error': median_squared_dummy_error,
@@ -94,12 +117,21 @@ class LinearRegressionModel:
                               }
 
     def save_and_print_evaluation_outcome(self):
+        '''
+        exports the evaluation metrics and prints them to the console
+        :return:
+        '''
         measure_df = pd.DataFrame(self.eval_measures.items(), columns=['Measure', 'Value'])
         measure_df.to_csv(self.evaluation_path)
         for measure, value in self.eval_measures.items():
             print(f'{measure}: {value:.2f}')
 
     def save_and_print_coefficients(self, verbose = False):
+        '''
+        exports the coefficients and prints them to the console. Interesting for later analysis
+        :param verbose: whether or not to print the coefficients, since it can be a long list
+        :return:
+        '''
         coefficients = self.model.coef_
         column_names = self.test_df.drop(columns=['average_elo']).columns
         coef_df = pd.DataFrame(
@@ -113,8 +145,12 @@ class LinearRegressionModel:
 
 
 class LSTMRegression:
+    '''
+    This class represent the LSTM Neural Network.
+    Parameter:
+     - It only uses the timeseries columns (i.e. evaluations and clocks up to 60) (this (60) parameter was fitted via gridsearch)
+    '''
     def __init__(self, game_type, n_rows):
-        print(game_type)
         self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
         base_dir = os.path.join('trained_models', 'lstm_only_ts', str(n_rows))
@@ -129,15 +165,25 @@ class LSTMRegression:
         # self.usefuls_cols = [f'eval_{i}' for i in range(60)] + ['average_elo']
 
     def median_abs_error(self, y_true, y_pred):
+        '''
+        A custom evaluation metric for the validation set
+        :param y_true: true value
+        :param y_pred: predicted value
+        :return:
+        '''
         abs_diff = abs(y_true - y_pred)
-        # this is for the median
+        # this is a tensorflow representation for the median
         return tfp.stats.percentile(abs_diff, 50.0, interpolation='midpoint')
 
     def train(self):
+        '''
+        fits the model to the training data. also takes 33% of the training data as validation set
+        :return:
+        '''
         epochs = 250
         batch_size = 256
 
-        print('reading train')
+        print('Start: reading training data')
         self.train_df = pd.read_csv(self.train_file, nrows=self.nrows, usecols=self.usefuls_cols)
         self.validation_df = self.train_df[int(self.nrows/1.5):]
         self.train_df = self.train_df[:int(self.nrows/1.5)]
@@ -146,12 +192,11 @@ class LSTMRegression:
         y_train = self.train_df['average_elo']
         y_validation = self.validation_df['average_elo']
         self.train_mean = np.mean(y_train)
-        print(self.train_mean)
-
-        err
+        # centering the data around 0 helped the NN to converge faster. maybe standard normalizing might be even better (std=1)
         y_train = y_train - self.train_mean
         y_validation = y_validation - self.train_mean
-        print('start training')
+
+        print('Start: training')
         input_shape = (X_train.shape[1],1)
         output_shape = 1
 
@@ -161,46 +206,76 @@ class LSTMRegression:
         self.model.add(Dense(output_shape))
         self.model.compile(loss='mean_squared_error', optimizer='adam', metrics=[self.median_abs_error])
         self.model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, validation_data=(X_validation, y_validation))
+        # this is just to clear these variables from the memory, as they are not used anymore
         self.train_df = pd.DataFrame()
         X_train = pd.DataFrame()
         y_train = pd.DataFrame()
 
+    def save(self):
+        '''
+        exports the trained model, so it can be used later for evaluation
+        :return:
+        '''
+        self.model.save(self.model_path)
+
+    def load(self):
+        '''
+        loads the exported model, so it can be used for evaluation
+        :return:
+        '''
+        self.model = load_model(self.model_path, custom_objects = {'median_abs_error': self.median_abs_error})
+
+
     def evaluate(self):
-        print('reading test')
+        '''
+        evaluates the model on the testing data w.r.t. different evaluation metrics
+        :return:
+        '''
+        print('Start: reading testing data')
         self.test_df = pd.read_csv(self.test_file, nrows=self.nrows, usecols=self.usefuls_cols)
-        print('starting eval')
+        print('Start: evaluation')
         X_test = self.test_df.drop(columns=['average_elo'])
         y_test = self.test_df['average_elo']
         y_pred = self.model.predict(X_test)
         y_pred = [i + self.train_mean for i in y_pred.flatten().tolist()]
+
+        # calculate the errors
         median_abs_error = np.median([abs(i - j) for i, j in zip(y_pred, y_test.tolist())])
         mean_abs_error = np.mean([abs(i - j) for i, j in zip(y_pred, y_test.tolist())])
+        median_squared_error = np.median([(i - j) ** 2 for i, j in zip(y_pred, y_test.tolist())])
+        mean_squared_error = np.mean([(i - j) ** 2 for i, j in zip(y_pred, y_test.tolist())])
         dummy_guess = np.mean(y_test.tolist())
         median_absolute_dummy_error = np.median([abs(i - dummy_guess) for i in y_test.tolist()])
         mean_absolute_dummy_error = np.mean([abs(i - dummy_guess) for i in y_test.tolist()])
+        median_squared_dummy_error = np.median([(i - dummy_guess) ** 2 for i in y_test.tolist()])
+        mean_squared_dummy_error = np.mean([(i - dummy_guess) ** 2 for i in y_test.tolist()])
 
-        # todo: add benchmark: always to guess the median.
-        self.eval_measures = {'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
+        self.eval_measures = {'Mean Squared Error': mean_squared_error, 'Median Squared Error': median_squared_error,
+                              'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
+                              'Mean Squared Dummy Error': mean_squared_dummy_error,
+                              'Median Squared Dummy Error': median_squared_dummy_error,
                               'Mean Absolute Dummy Error': mean_absolute_dummy_error,
                               'Median Absolute Dummy Error': median_absolute_dummy_error
                               }
 
     def save_and_print_evaluation_outcome(self):
+        '''
+        exports the evaluation metrics and prints them to the console
+        :return:
+        '''
         measure_df = pd.DataFrame(self.eval_measures.items(), columns=['Measure', 'Value'])
         measure_df.to_csv(self.evaluation_path)
         for measure, value in self.eval_measures.items():
             print(f'{measure}: {value:.2f}')
 
-    def save(self):
-        self.model.save(self.model_path)
-
-    def load(self):
-        self.model = load_model(self.model_path, custom_objects = {'median_abs_error': self.median_abs_error})
-
-
 
 
 class XGBoostRegression:
+    '''
+    This class represent the XGBoost Regrssion Model.
+    Parameter:
+     - It only uses the timeseries columns (i.e. evaluations and clocks up to 60) (this (60) parameter was fitted via gridsearch)
+    '''
     def __init__(self, game_type, n_rows, limit):
         self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
@@ -217,47 +292,75 @@ class XGBoostRegression:
 
 
     def train(self):
-        print('reading train')
+        '''
+        fits the model to the training data. also takes 33% of the training data as validation set
+        :return:
+        '''
+        print('Start: reading training data')
         self.train_df = pd.read_csv(self.train_file, nrows=self.nrows, usecols = self.usefuls_cols)
         X_train = self.train_df.drop(columns=['average_elo'])
         y_train = self.train_df['average_elo']
-        print('start training')
+
+        print('Start: training')
         self.model.fit(X_train, y_train)
+        # this is just to clear these variables from the memory, as they are not used anymore
         self.train_df = pd.DataFrame()
         X_train = pd.DataFrame()
         y_train = pd.DataFrame()
-        print('finished training')
 
     def save(self):
+        '''
+        exports the trained model, so it can be used later for evaluation
+        :return:
+        '''
         with open(self.model_path, 'wb') as f:
             pickle.dump(self.model, f)
 
     def load(self):
+        '''
+        loads the exported model, so it can be used for evaluation
+        :return:
+        '''
         with open(self.model_path, 'rb') as f:
             self.model = pickle.load(f)
 
     def evaluate(self):
-        print('reading test')
+        '''
+        evaluates the model on the testing data w.r.t. different evaluation metrics
+        :return:
+        '''
+        print('Start: reading testing data')
         self.test_df = pd.read_csv(self.test_file, nrows=self.nrows, usecols = self.usefuls_cols)
         self.test_df = self.clean_dataset(self.test_df, False)
-        print('starting eval')
+        print('Start: evaluation')
         self.test_df = self.test_df[self.valid_columns]
         X_test = self.test_df.drop(columns=['average_elo'])
         y_test = self.test_df['average_elo']
         y_pred = self.model.predict(X_test)
 
+        # calculate the errors
         median_abs_error = np.median([abs(i - j) for i,j in zip(y_pred, y_test.tolist())])
         mean_abs_error = np.mean([abs(i - j) for i,j in zip(y_pred, y_test.tolist())])
+        median_squared_error = np.median([(i - j) ** 2 for i, j in zip(y_pred, y_test.tolist())])
+        mean_squared_error = np.mean([(i - j) ** 2 for i, j in zip(y_pred, y_test.tolist())])
         dummy_guess = np.mean(y_test.tolist())
         median_absolute_dummy_error = np.median([abs(i - dummy_guess) for i in y_test.tolist()])
         mean_absolute_dummy_error = np.mean([abs(i - dummy_guess) for i in y_test.tolist()])
+        median_squared_dummy_error = np.median([(i - dummy_guess) ** 2 for i in y_test.tolist()])
+        mean_squared_dummy_error = np.mean([(i - dummy_guess) ** 2 for i in y_test.tolist()])
 
         # todo: add benchmark: always to guess the median.
-        self.eval_measures = {'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
+        self.eval_measures = {'Mean Squared Error': mean_squared_error, 'Median Squared Error': median_squared_error,
+                              'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
+                              'Mean Squared Dummy Error': mean_squared_dummy_error, 'Median Squared Dummy Error': median_squared_dummy_error,
                               'Mean Absolute Dummy Error': mean_absolute_dummy_error, 'Median Absolute Dummy Error': median_absolute_dummy_error
                               }
 
     def save_and_print_evaluation_outcome(self):
+        '''
+        exports the evaluation metrics and prints them to the console
+        :return:
+        '''
         measure_df = pd.DataFrame(self.eval_measures.items(), columns=['Measure', 'Value'])
         measure_df.to_csv(self.evaluation_path)
         for measure, value in self.eval_measures.items():
@@ -268,14 +371,12 @@ class XGBoostRegression:
 
 class CombinedModel():
     '''
-    Here we want to load two trained models (one linear regression, one XGBoost), average their predicted values for the test set and see if that is better than either model.
-    limit 60 is good
+    Here we load two trained models (one linear regression, one Advanced), average their predicted values for the test set and see if that is better than either model.
     '''
     def __init__(self, game_type, n_rows, model_type):
-
-
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
 
+        # initialize all the directories to the models etc.
         linear_base_dir = os.path.join('trained_models', 'linear_regression', str(n_rows))
         self.linear_model_path = os.path.join(linear_base_dir, f'{game_type}_model.pkl')
         self.valid_columns_file = os.path.join(linear_base_dir, f'{game_type}_valid_cols.txt')
@@ -311,26 +412,46 @@ class CombinedModel():
         self.evaluation_path = os.path.join(base_dir, f'{game_type}_eval.csv')
 
     def load_xgb(self):
+        '''
+        loads the exported xgboost model, so it can be used for evaluation
+        :return:
+        '''
         with open(self.xbg_model_path, 'rb') as f:
             self.advanced_model = pickle.load(f)
 
     def median_abs_error(self, y_true, y_pred):
+        '''
+        A custom evaluation metric for the validation set
+        :param y_true: true value
+        :param y_pred: predicted value
+        :return:
+        '''
         abs_diff = abs(y_true - y_pred)
         # this is for the median
         return tfp.stats.percentile(abs_diff, 50.0, interpolation='midpoint')
 
     def load_lstm(self):
+        '''
+        loads the exported LSTM model, so it can be used for evaluation
+        :return:
+        '''
         self.advanced_model = load_model(self.lstm_model_path, custom_objects={'median_abs_error': self.median_abs_error})
 
     def load_linear_model(self):
+        '''
+        loads the exported linear model, so it can be used for evaluation
+        :return:
+        '''
         with open(self.linear_model_path, 'rb') as f:
             self.linear_model = pickle.load(f)
 
     def evaluate(self):
+        '''
+        evaluates the models on the testing data w.r.t. different evaluation metrics
+        :return:
+        '''
         # predict advanced model
         test_df = pd.read_csv(self.test_file, nrows=self.nrows, usecols=self.usefuls_cols)
-        print(test_df.shape)
-        errr
         X_test = test_df.drop(columns=['average_elo'])
         y_test = test_df['average_elo']
         y_pred_advanced = self.advanced_model.predict(X_test)
@@ -369,6 +490,10 @@ class CombinedModel():
                               }
 
     def save_and_print_evaluation_outcome(self):
+        '''
+        exports the evaluation metrics and prints them to the console
+        :return:
+        '''
         measure_df = pd.DataFrame(self.eval_measures.items(), columns=['Measure', 'Value'])
         measure_df.to_csv(self.evaluation_path)
         for measure, value in self.eval_measures.items():
@@ -377,77 +502,59 @@ class CombinedModel():
 
 
 if __name__ == '__main__':
-    '''
-    Ideas:
-    maybe drop the columns, wiht the opening that are super rare (like <10 in the whole dataset)
-    #TODOs:
-     - add mechanism to save() and load() models, and save and load their evaluations.
-     - add excel export for the coefficients
-     - add LSTM Model (with everything)
-     - add LSTM Model (only with the timeseries)
-     - make combination model of lstm + Linear regression
-     
-    '''
+    ##############################################
+    ############## Train the models ##############
+    ##############################################
     # Linear Regression:
-    # game_types = ['classical', 'bullet', 'rapid', 'blitz']
-    # for game_type in game_types:
-    #     model = LinearRegressionModel(game_type, 1000000)
-    #     model.train()
-    #     model.save()
-    #     model.load()
-    #     model.evaluate()
-    #     model.save_and_print_coefficients(verbose=False)
-    #     print(f'Gametype: {game_type}')
-    #     model.save_and_print_evaluation_outcome()
+    game_types = ['classical', 'bullet', 'rapid', 'blitz']
+    for game_type in game_types:
+        model = LinearRegressionModel(game_type, 1000000)
+        model.train()
+        model.save()
+        model.load()
+        model.evaluate()
+        model.save_and_print_coefficients(verbose=False)
+        print(f'Gametype: {game_type}, n_rows = {1000000}')
+        model.save_and_print_evaluation_outcome()
 
     # XGBoost:
-    # game_types = ['classical', 'bullet', 'rapid', 'blitz']
-    # for game_type in game_types:
-    #     model = XGBoostRegression(game_type, 1000000, 60)
-    #     model.train()
-    #     model.save()
-    #     model.load()
-    #     model.evaluate()
-    #     print(f'Gametype: {game_type}, limit = {limit}')
-#         model.save_and_print_evaluation_outcome()
+    for game_type in game_types:
+        model = XGBoostRegression(game_type, 1000000, 60)
+        model.train()
+        model.save()
+        model.load()
+        model.evaluate()
+        print(f'Gametype: {game_type}, n_rows = {1000000}')
+        model.save_and_print_evaluation_outcome()
 
     # LSTM
-    # game_types = ['classical', 'bullet', 'rapid', 'blitz']
-    # n_rows = 300000
-    # for game_type in game_types:
-    #     model = LSTMRegression(game_type, n_rows)
-    #     model.train()
-    #     model.save()
-    #     model.load()
-    #     model.evaluate()
-    #     print(f'Gametype: {game_type}, n_rows: {n_rows}')
-    #     model.save_and_print_evaluation_outcome()
-    #     # thes are f
+    for game_type in game_types:
+        model = LSTMRegression(game_type, 300000)
+        model.train()
+        model.save()
+        model.load()
+        model.evaluate()
+        print(f'Gametype: {game_type}, n_rows: {300000}')
+        model.save_and_print_evaluation_outcome()
 
 
-    # classical, 300000 nrows, 200 epochs
-    # bullet, 300000 nrows, 250 epochs
-    # rapid, 300000 nrows, 200 epochs
-    # blitz, 300000 nrows, 250 epochs
 
     ########################################################
     ############## Evaluations on 1 Mio Games ##############
     ########################################################
 
-    #
     # Combined with XGB
-    game_types = ['classical', 'bullet', 'rapid', 'blitz']
     for game_type in game_types:
         model = CombinedModel(game_type, 1000000, 'xgboost')
         model.evaluate()
+        print(f'Gametype: {game_type}, n_rows: {1000000}')
         model.save_and_print_evaluation_outcome()
 
 
     # Combined with LSTM
-
-    game_types = ['classical', 'bullet', 'rapid', 'blitz']
     for game_type in game_types:
         print(game_type)
         model = CombinedModel(game_type, 1000000, 'lstm')
         model.evaluate()
+        print(f'Gametype: {game_type}, n_rows: {1000000}')
         model.save_and_print_evaluation_outcome()
