@@ -7,23 +7,19 @@ import seaborn as sns
 from scipy import stats
 import ast
 
-
-
 from matplotlib.colors import LinearSegmentedColormap
+
+
 
 class DataAnalysis:
     '''
-    This class is supposed to create a bunch of descriptive statistics and
-    TODO: add an overview of the number of games we have
-    TODO: add a viz of all the datapoints we have per game
+    This class is supposed to create a bunch of descriptive statistics and plots
     '''
     def __init__(self):
         self.data_file = os.path.join('data', 'processed', 'all_games_clean', 'classical_train.csv')
         self.plot_export_folder = os.path.join('plots')
         self.stats_export_folder = os.path.join('evaluations')
         self.data = pd.read_csv(self.data_file, index_col = 0, nrows = 1000000)
-        print(self.data.shape)
-
 
 
     def run_everything(self):
@@ -54,10 +50,10 @@ class DataAnalysis:
     def plot_numerical_variables(self):
         '''
         creates a grid of scatter plots of some of the variables.
-        not worthy to present, but maybe interesing to look at
+        not worthy to present for all variables, but maybe interesing to look at
         :return:
         '''
-        numerical_data = self.data[['number_of_checks', 'white_castling', 'black_castling', 'number_of_captures', 'knight_moves', 'bishop_moves', 'rook_moves', 'queen_moves', 'king_moves', 'pawn_moves', 'number_of_blunders', 'number_of_bad_moves', 'number_of_dubious_moves', 'evaluation_variance', 'evaluation_iqr', 'evaluation_range', 'average_elo']]
+        # numerical_data = self.data[['number_of_checks', 'white_castling', 'black_castling', 'number_of_captures', 'knight_moves', 'bishop_moves', 'rook_moves', 'queen_moves', 'king_moves', 'pawn_moves', 'number_of_blunders', 'number_of_bad_moves', 'number_of_dubious_moves', 'evaluation_variance', 'evaluation_iqr', 'evaluation_range', 'average_elo']]
         numerical_data = self.data[['number_of_blunders', 'average_elo', 'number_of_moves','evaluation_variance']]
         print(numerical_data)
         g = sns.PairGrid(numerical_data)
@@ -110,19 +106,24 @@ class DataAnalysis:
         self.data['rating_bucket'] = self.data['average_elo'].apply(lambda x: int(base * round(stats.percentileofscore(self.data['average_elo'], x, 'rank')/base)/ 1))
 
         fig, ax = plt.subplots(2,1, figsize=(12, 9), sharex=True)
+        # iterate over the first 3000 instances, as it gets messy, when there are more
         for index, row in self.data.iloc[:3000].iterrows():
             if (row['rating_bucket'] > 1) and (row['rating_bucket'] < 99):
                 continue
             evals = row[[f'eval_{j}' for j in range(100)]]
+            
             # delete the padded 0'es
             for i in range(len(evals) - 1, -1, -1):
                 if evals[i] != 0:
                     break
             evals = evals[:i+1]
+
+            # if the rating of the game was very low, plot it red, otherwise green
             if row['rating_bucket'] <= 1:
                 ax[0].plot(range(len(evals)), evals, alpha = 0.4, linewidth=1, color = 'tab:red')
             else:
                 ax[1].plot(range(len(evals)), evals, alpha = 0.4, linewidth=1, color = 'tab:green')
+        
         ax[0].set_ylim([-50,50])
         ax[0].set_xlim([0, 60])
         ax[1].set_ylim([-50, 50])
@@ -145,17 +146,20 @@ class DataAnalysis:
                 continue
             if (row['rating_bucket'] > 1) and (row['rating_bucket'] < 99):
                 continue
-            # evals = [float(i) for i in row[[f'eval_{j}']) if not '#' in i]
+
             evals = row[[f'clock_{j}' for j in range(100)]]
             # delete the padded 0'es
             for i in range(len(evals) - 1, -1, -1):
                 if evals[i] != 0:
                     break
             evals = evals[:i + 1]
+
+            # if the rating of the game was very low, plot it red, otherwise green
             if row['rating_bucket'] <= 1:
                 ax[0].plot(range(len(evals)), list(np.cumsum(evals)), alpha=0.4, linewidth=1, color='tab:red')
             else:
                 ax[1].plot(range(len(evals)), list(np.cumsum(evals)), alpha=0.4, linewidth=1, color='tab:green')
+        
         ax[0].set_ylim([0, 5000])
         ax[0].set_xlim([0, 100])
         ax[1].set_ylim([0, 5000])

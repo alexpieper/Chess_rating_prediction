@@ -20,6 +20,7 @@ class LinearRegressionModel:
      - It only uses the features, whose absolute sum is larger than 10. (this filters the very rare opening, as they tend to overfit to the trainin data. coefficient goes up to 10000)
     '''
     def __init__(self, game_type, n_rows):
+        # get all the data, paths and parameter
         self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
         base_dir = os.path.join('trained_models', 'linear_regression', str(n_rows))
@@ -151,6 +152,7 @@ class LSTMRegression:
      - It only uses the timeseries columns (i.e. evaluations and clocks up to 60) (this (60) parameter was fitted via gridsearch)
     '''
     def __init__(self, game_type, n_rows):
+        # get all the data, paths and parameter
         self.train_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_train.csv')
         self.test_file = os.path.join('data', 'processed', 'all_games_clean', f'{game_type}_test.csv')
         base_dir = os.path.join('trained_models', 'lstm_only_ts', str(n_rows))
@@ -162,7 +164,6 @@ class LSTMRegression:
         self.valid_columns_file = os.path.join(base_dir, f'{game_type}_valid_cols.txt')
         self.nrows = n_rows
         self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
-        # self.usefuls_cols = [f'eval_{i}' for i in range(60)] + ['average_elo']
 
     def median_abs_error(self, y_true, y_pred):
         '''
@@ -180,6 +181,7 @@ class LSTMRegression:
         fits the model to the training data. also takes 33% of the training data as validation set
         :return:
         '''
+        # more hyperparameter
         epochs = 250
         batch_size = 256
 
@@ -349,7 +351,6 @@ class XGBoostRegression:
         median_squared_dummy_error = np.median([(i - dummy_guess) ** 2 for i in y_test.tolist()])
         mean_squared_dummy_error = np.mean([(i - dummy_guess) ** 2 for i in y_test.tolist()])
 
-        # todo: add benchmark: always to guess the median.
         self.eval_measures = {'Mean Squared Error': mean_squared_error, 'Median Squared Error': median_squared_error,
                               'Mean Absolute Error': mean_abs_error, 'Median Absolute Error': median_abs_error,
                               'Mean Squared Dummy Error': mean_squared_dummy_error, 'Median Squared Dummy Error': median_squared_dummy_error,
