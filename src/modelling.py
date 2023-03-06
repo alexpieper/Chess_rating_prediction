@@ -26,17 +26,22 @@ class LinearRegressionModel:
         base_dir = os.path.join('trained_models', 'linear_regression', str(n_rows))
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
+        # will contain the exported linear regression model
         self.model_path = os.path.join(base_dir, f'{game_type}_model.pkl')
+        # will contain the evaluation metrics
         self.evaluation_path = os.path.join(base_dir, f'{game_type}_eval.csv')
+        # will contain the coefficients of the features
         self.coefficients_path = os.path.join(base_dir, f'{game_type}_coefs.csv')
+        # will contain the columns, that are left after the cleaning (as described in the class description)
         self.valid_columns_file = os.path.join(base_dir, f'{game_type}_valid_cols.txt')
+        # the number of rows/games we want to train on, to save memory and time
         self.nrows = n_rows
         self.model = LinearRegression()
 
     def clean_dataset(self, df, load_new):
         '''
          applies the above mentioned filtering of sparse columns and save these columns in a txt file, for the testing
-        :param df: training of testing data
+        :param df: training or testing data
         :param load_new: whether to calculate the columns new. usually (training: True, testing: False)
         :return: cleaned df
         '''
@@ -149,7 +154,7 @@ class LSTMRegression:
     '''
     This class represent the LSTM Neural Network.
     Parameter:
-     - It only uses the timeseries columns (i.e. evaluations and clocks up to 60) (this (60) parameter was fitted via gridsearch)
+     - It only uses the timeseries columns (i.e. evaluations and clocks up to 60) (this (60) parameter was fitted via bandit based optimization)
     '''
     def __init__(self, game_type, n_rows):
         # get all the data, paths and parameter
@@ -184,6 +189,7 @@ class LSTMRegression:
         # more hyperparameter
         epochs = 250
         batch_size = 256
+        n_units = 32
 
         print('Start: reading training data')
         self.train_df = pd.read_csv(self.train_file, nrows=self.nrows, usecols=self.usefuls_cols)
@@ -203,7 +209,7 @@ class LSTMRegression:
         output_shape = 1
 
         self.model = Sequential()
-        self.model.add(LSTM(units=32, input_shape=input_shape))
+        self.model.add(LSTM(units=n_units, input_shape=input_shape))
         self.model.add(Dropout(0.2))
         self.model.add(Dense(output_shape))
         self.model.compile(loss='mean_squared_error', optimizer='adam', metrics=[self.median_abs_error])
@@ -393,6 +399,7 @@ class CombinedModel():
             self.usefuls_cols = [f'eval_{i}' for i in range(60)] + [f'clock_{i}' for i in range(60)] + ['average_elo']
             self.load_xgb()
         elif model_type == 'lstm':
+            # these are the train_means, that are needed to be added to the prediction
             self.train_means = {
                 'bullet': 1502.622895,
                 'blitz': 1613.1635275,
