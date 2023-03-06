@@ -7,8 +7,8 @@ The goal is to use open source data to create a model, that can predict the elo/
 ___
 ## Dataset
 the raw dataset for this project can be downloaded at [lichess.org](https://database.lichess.org).\
-They save all the games played on the site and make it openly available in the common chess notation PGN. This is basically a list of games, as describe on the above linked page.\
-Even compressed, the data of one month is ~33 GB (~100.000.000 games), which is why a lot of optimization in the processing of this data takes place.\
+They save all the games played on the site and make it openly available in the common chess notation PGN. This is basically a list of games, as described on the above linked page.\
+Even compressed, the data of one month is ~33 GB (~100.000.000 games), which is why a lot of optimization in the processing of this data takes place.
 
 
 ___
@@ -17,7 +17,7 @@ ___
 There are three main folders, to this repository
 1. `src/`, containing the python scripts for preprocessing, analysing and modelling the data
 2. `data/`, containing under `data/raw/` the raw data from lichess and under `data/processed/` the cleaned data exports as `.csv`, which can be used for machine learning.
-3. `trainded_models/` containing the various models, that were trained, as well as potentially coefficients, and the evaluations on the test data
+3. `trained_models/` containing the various models, that were trained, as well as potentially coefficients, and the evaluations on the test data
 
 
 ___
@@ -26,15 +26,15 @@ ___
 The folder `src/` contains the following three python scripts
 ___
 ### `src/data_preprocessing.py`
-The data is grouped into 4 different categories, that are based on the timecontrol of the game. The hypothesis here is, that a game of bullet chess, where each player only has one minute to play, looks very different than a classical game, where each player has at least 30 minutes.\
+The data of the chess games is grouped into 4 different categories, that are based on the timecontrol of the game. The hypothesis here is, that a game of bullet chess, where each player only has one minute to play, looks very different than a classical game, where each player has at least 30 minutes.\
 This script contains several functions that in total read the original file of games and process them into 8 `.csv` files: One training and one testing dataset per timecontrol.\
-There are several metadata information, i extract from the list of moves, like 'number of king moves' and 'number of checks', as well as the first moves played and the name of the opening, as one-hot encoded features.\
+There are several metadata information, I extract from the list of moves, like 'number of king moves' and 'number of checks', as well as the first moves played and the name of the opening, as one-hot encoded features.\
 Furthermore, I added the timeseries of the 'evaluation of the position', as well as the 'time spent per move' to the file.\
-For the sake of simplicity, i created the columns `average_elo`, which is the mean of the elo of the two players. This will represent the regression target of the model. Furthermore, all game with a rating difference of >200, will be disregarded. (this was less than 5% of the games)
+For the sake of simplicity, i created the column `average_elo`, which is the arithmetic mean of the elo of the two players. This will represent the regression target of the model. Furthermore, all game with a rating difference of >200, will be disregarded. (this was less than 5% of the games)
 
-The input data, expected for these functions are way to large to be stored on git, but can be downloaded at the above mentioned link. In this script, the files from october and november 2022 were used.
+The input data, expected for these functions, is way to large to be stored on git, but can be downloaded at the above mentioned link. In this script, the files from october and november 2022 were used.
 
-These functions are written in a batched manner, to save memory. The last function is designed to concat all the batch exports and also perform a train/test split (60%/40%), before export the data to a .csv file.
+These functions are written in a batched manner, to save memory. The last function is designed to concat all the batch exports and also perform a train/test split (60%/40%), before exporting the data to 8 .csv files.
 ___
 ### `src/data_analysis.py`
 This script uses the previously exported datafiles and performs some simple data analysis on it, as well as exports some interesting graphics.
@@ -63,6 +63,12 @@ ___
 ## Used Libraries
 All the used libraries can be found in `requirements.txt` 
 The main libraries used for the Modelling, are [keras](https://keras.io/api/layers/recurrent_layers/lstm/), with its LSTM implementations and [xgboost](https://xgboost.readthedocs.io/en/stable/python/python_api.html), with its gradinent boosting library.
+
+___
+## How to run this code
+To run this code, go to the above linked page on lichess.org and download a dataset and save in this repo under `data/raw`. then you might have to adjust the filename in the `src/data_preprocessing.py` file and run this script. Pleas note that this takes a very long time, depending on the sizze of the dataset.
+
+Then you could do the data analysis, or jump right into the modelling, by executing the file `src/modelling.py`. this should create all the necessary folders, train and evaluate the models. Please not that this also takes a very long time, depending on the size of the cleaned data.
 
 ___
 ## Further notes
