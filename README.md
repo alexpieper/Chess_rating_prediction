@@ -53,6 +53,8 @@ This script contains the functions for the actual modelling of the `average_elo`
 The combined model is an ensemble model, combining the prediction from the linear Regression and the XGBoost/LSTM. Since they are trained on different subsets of the data the hypothesis is that the Ensemble might improve the quality of either single model. Here, these function names might change.\
 Also some models have even more functions, depending on the type of the model.
 
+The Linear Reegression model uses only the metadata columns as input, while the XGBoost and LSTM models use only the timeseries features (evaluation, clocks). That is beacuse i tried the other combinations, but Linear regression performed worse with the timeseries information and LSTM performed worse with the metadata.
+
 There are some hyperparameters in the LSTM Model, that were determined, using manual Bandit based optimization. That means some of the training data was hold back as a validation set. The performance on these sets was measured during training, and when the perfromance on a certain parameter set was very bad after some interations, that set was ruled out.
 
 The hyperparaeters, that were considered were: batch_size, number of hidden layers, number of LSTM units and the length of the evaluation and clock timeseries.
