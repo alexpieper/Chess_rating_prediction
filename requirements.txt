@@ -4,10 +4,10 @@ tqdm
 matplotlib
 seaborn
 numpy
-sklearn
 scikit-learn
 pickle
 keras
 tensorflow
 xgboost
 tensorflow_probability
+zstandard
