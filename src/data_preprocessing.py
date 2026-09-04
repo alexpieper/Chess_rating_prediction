@@ -285,15 +285,13 @@ def clean_batched_files():
             eval_lists = []
             clock_lists = []
 
-            # here we add padding to the timeseries
-            for evals in all_games['all_evaluations']:
-                parsed_eval = [-40 if '#-' in i else (40 if '#' in i else (40 if float(i) > 40 else (-40 if float(i) < -40 else float(i)))) for i in evals]
+            for index, row in all_games.iterrows():
+                parsed_eval = [-100 if '#-' in i else (100 if '#' in i else float(i)) for i in row['all_evaluations']]
+                # here we add padding to the timeseries
                 eval_lists += [parsed_eval + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_eval))]]
-            for (clocks, increment) in zip(all_games['all_clocks'], all_games['time_control_increment']):
-                # the datetime module was too slow
-                timestamps_dt = [int(ts[5:7]) + 60*int(ts[2:4]) + 3600*int(ts[0]) for ts in clocks]
-                parsed_clock = [int(t1 - t2 + int(increment)) for t1, t2 in zip(timestamps_dt[:-1], timestamps_dt[2:])]
-                clock_lists += [parsed_clock + [0 for i in range(limit_map[category]['upper'] - len(parsed_clock))]]
+                timestamps_dt = [datetime.datetime.strptime(ts, '%H:%M:%S') for ts in row['all_clocks']]
+                parsed_clock = [abs(int((t2 - t1).total_seconds())) for t1, t2 in zip(timestamps_dt[:-1], timestamps_dt[2:])]
+                clock_lists += [parsed_clock + [0.0 for i in range(limit_map[category]['upper'] - len(parsed_clock))]]
 
             eval_df = pd.DataFrame(eval_lists, columns = eval_columns)
             clock_df = pd.DataFrame(clock_lists, columns = clock_columns)
@@ -358,6 +356,6 @@ def concat_clean_batched_files():
 
 if __name__ == '__main__':
     # remember: do this once with october games and once with the november games
-    # filter_and_preprocess_data()
+    filter_and_preprocess_data()
     clean_batched_files()
     concat_clean_batched_files()
