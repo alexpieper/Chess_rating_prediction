@@ -4,3 +4,5 @@ trained_models/
 *.xlsx
 *.pdf
 *.DS_Store
+
+__pycache__
