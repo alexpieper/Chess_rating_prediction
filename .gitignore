@@ -1,4 +1,8 @@
-data/
+# data: keep processed output and the large raw exports out of git,
+# but allow the small samples in data/raw/samples/
+data/processed/
+data/raw/*.pgn
+data/raw/*.pgn.zst
 trained_models/
 .idea
 *.xlsx
