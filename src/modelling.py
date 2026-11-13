@@ -20,7 +20,7 @@ class BaseChessModel:
         game_type: str,
         n_rows: int,
         base_dir: str,
-        processed_data_dir: str = os.path.join("data", "processed", "all_games_clean"),
+        processed_data_dir: str = os.path.join("data", "processed"),
     ):
         self.game_type = game_type
         self.nrows = n_rows
@@ -84,7 +84,7 @@ class LinearRegressionModel(BaseChessModel):
         self,
         game_type: str,
         n_rows: int = 1_000_000,
-        processed_data_dir: str = os.path.join("data", "processed", "all_games_clean"),
+        processed_data_dir: str = os.path.join("data", "processed"),
     ):
         base_dir = os.path.join("trained_models", "linear_regression", str(n_rows))
         super().__init__(game_type, n_rows, base_dir, processed_data_dir)
@@ -155,7 +155,7 @@ class XGBoostRegression(BaseChessModel):
         game_type: str,
         n_rows: int = 1_000_000,
         limit: int = 60,
-        processed_data_dir: str = os.path.join("data", "processed", "all_games_clean"),
+        processed_data_dir: str = os.path.join("data", "processed"),
     ):
         self.limit = limit
         base_dir = os.path.join("trained_models", "xgboost_only_ts", str(n_rows), str(limit))
